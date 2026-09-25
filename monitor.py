@@ -74,7 +74,16 @@ class AlhambraMonitor:
         tickets = []
         
         try:
+            logger.info(f"Conectando a {self.base_url}...")
             response = self.session.get(self.base_url, timeout=10)
+            
+            logger.info(f"Respuesta: {response.status_code}")
+            if response.status_code == 403:
+                logger.error("ACCESO DENEGADO (403) - La página puede tener protección WAF")
+                logger.info("Intenta acceder manualmente desde tu navegador:")
+                logger.info(f"  → {self.base_url}")
+                return []
+            
             response.raise_for_status()
             
             soup = BeautifulSoup(response.content, 'html.parser')
