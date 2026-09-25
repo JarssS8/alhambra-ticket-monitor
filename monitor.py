@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
 Monitor de precios - tickets.alhambra-patronato.es
-- Descarga la web con Obscura (navegador headless en Rust; curl/requests reciben 403)
+- Descarga la web con requests resolviendo el reto anti-bot de TransparentEdge
+  (proof-of-work SHA-256); Obscura como respaldo
 - Extrae el precio de cada producto (enlaces /producto/... "Comprar entradas | X€")
 - Loguea TODOS los precios en cada ejecución
 - Avisa por Discord mencionando al usuario SOLO si algún precio baja
 """
+import hashlib
 import json
 import os
 import re
@@ -32,31 +34,77 @@ def log(msg: str) -> None:
     print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC] {msg}", flush=True)
 
 
-def fetch_html(retries: int = 4) -> str:
-    """Obscura en modo stealth. La web a veces sirve un reto anti-bot;
-    la cookie que deja se guarda en --storage-dir y el siguiente intento pasa."""
-    storage = os.getenv("OBSCURA_STORAGE", "obscura-storage")
-    out_file = Path("page.html")
+CHALLENGE_RE = re.compile(r'"([0-9a-f]{64})~([0-9a-f]+)~(\d+)~(\d+)"')
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+}
+
+
+def solve_challenge(html: str):
+    """Reto proof-of-work de TransparentEdge: nonce tal que
+    sha256(f"{seed}:{ts}~{nonce}") empiece por `difficulty`. Cookie TEDGEUA = f"{ts}~{nonce}"."""
+    m = CHALLENGE_RE.search(html)
+    if not m:
+        return None
+    seed, difficulty, ts, _ttl = m.groups()
+    prefix = f"{seed}:{ts}~"
+    nonce = 0
+    while not hashlib.sha256(f"{prefix}{nonce}".encode()).hexdigest().startswith(difficulty):
+        nonce += 1
+    return f"{ts}~{nonce}"
+
+
+def fetch_with_requests(retries: int = 3) -> str:
+    session = requests.Session()
+    session.headers.update(HEADERS)
     for attempt in range(1, retries + 1):
-        out_file.unlink(missing_ok=True)
-        try:
-            proc = subprocess.run(
-                [OBSCURA_BIN, "--stealth", "--storage-dir", storage, "fetch", URL,
-                 "--dump", "html", "--wait", str(4 + 3 * attempt), "--timeout", "45",
-                 "--quiet", "--output", str(out_file)],
-                capture_output=True, text=True, timeout=120,
-            )
-            html = out_file.read_text(errors="ignore") if out_file.exists() else ""
-            if "/producto/" in html:
-                log(f"Página obtenida en el intento {attempt}")
-                return html
-            title = re.search(r"<title>(.*?)</title>", html, re.S)
-            log(f"Intento {attempt}: sin productos ({len(html)} bytes, título: "
-                f"{title.group(1).strip()[:60] if title else '-'}) {proc.stderr[-150:].strip()}")
-        except subprocess.TimeoutExpired:
-            log(f"Intento {attempt}: timeout")
-        time.sleep(5 * attempt)
-    raise RuntimeError("No se pudo obtener la página con productos tras varios intentos")
+        r = session.get(URL, timeout=20)
+        if "/producto/" in r.text:
+            log(f"Página obtenida (requests, intento {attempt}, HTTP {r.status_code})")
+            return r.text
+        cookie = solve_challenge(r.text)
+        if not cookie:
+            log(f"requests intento {attempt}: HTTP {r.status_code} sin reto reconocible")
+            time.sleep(3)
+            continue
+        log(f"requests intento {attempt}: reto anti-bot resuelto (TEDGEUA={cookie})")
+        domain = "tickets.alhambra-patronato.es"
+        session.cookies.set("TEDGEUA", cookie, domain=domain, path="/")
+        session.cookies.set("TEDGEUAS", cookie, domain=domain, path="/")
+        time.sleep(1)
+    return ""
+
+
+def fetch_with_obscura() -> str:
+    out_file = Path("page.html")
+    out_file.unlink(missing_ok=True)
+    subprocess.run(
+        [OBSCURA_BIN, "--stealth", "fetch", URL, "--dump", "html", "--wait", "10",
+         "--quiet", "--output", str(out_file)],
+        capture_output=True, text=True, timeout=120,
+    )
+    html = out_file.read_text(errors="ignore") if out_file.exists() else ""
+    if "/producto/" in html:
+        log("Página obtenida (Obscura)")
+    return html
+
+
+def fetch_html() -> str:
+    try:
+        html = fetch_with_requests()
+        if html:
+            return html
+    except requests.RequestException as e:
+        log(f"requests falló: {e}")
+    if Path(OBSCURA_BIN).exists():
+        log("Probando respaldo con Obscura...")
+        html = fetch_with_obscura()
+        if "/producto/" in html:
+            return html
+    raise RuntimeError("No se pudo obtener la página con productos")
 
 
 def pretty_name(slug: str) -> str:
@@ -124,7 +172,7 @@ def notify_discord(drops: list, test: bool) -> None:
 
 
 def main() -> None:
-    log(f"Consultando {URL} con Obscura...")
+    log(f"Consultando {URL} ...")
     current = parse_prices(fetch_html())
     if not current:
         log("❌ No se encontraron precios: la estructura de la web puede haber cambiado")
