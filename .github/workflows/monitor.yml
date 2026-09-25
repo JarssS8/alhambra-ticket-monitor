@@ -56,7 +56,17 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
           TEST_DROP: ${{ inputs.test_drop || 'false' }}
-        run: python monitor.py
+        shell: bash
+        run: |
+          set -o pipefail
+          python monitor.py 2>&1 | tee run.log
+      - name: Resumen para diagnóstico
+        if: always()
+        shell: bash
+        run: |
+          [ -f run.log ] || exit 0
+          if [ "${{ job.status }}" = "success" ]; then T=notice; else T=error; fi
+          echo "::$T title=monitor::$(tail -c 1500 run.log | sed 's/%/%25/g' | tr '\n' '|')"
 
       - name: Guardar estado
         if: success() && inputs.test_drop != true
