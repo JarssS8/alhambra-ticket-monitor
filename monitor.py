@@ -17,6 +17,13 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 from dotenv import load_dotenv
 
+# Selenium para navegador real (evitar WAF/403)
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+
 # Cargar variables de entorno
 load_dotenv()
 
@@ -70,28 +77,45 @@ class AlhambraMonitor:
         logger.info("Monitor inicializado")
     
     def check_availability(self) -> List[TicketInfo]:
-        """Verifica disponibilidad de entradas en la web oficial"""
+        """Verifica disponibilidad de entradas usando Selenium (evita WAF/403)"""
         tickets = []
+        driver = None
         
         try:
-            logger.info(f"Conectando a {self.base_url}...")
-            response = self.session.get(self.base_url, timeout=10)
+            logger.info(f"Abriendo navegador Chrome para {self.base_url}...")
             
-            logger.info(f"Respuesta: {response.status_code}")
-            if response.status_code == 403:
-                logger.error("ACCESO DENEGADO (403) - La página puede tener protección WAF")
-                logger.info("Intenta acceder manualmente desde tu navegador:")
-                logger.info(f"  → {self.base_url}")
-                return []
+            # Configurar opciones de Chrome
+            chrome_options = Options()
+            chrome_options.add_argument("--headless")  # Modo headless (sin ventana)
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--window-size=1920,1080")
+            chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
             
-            response.raise_for_status()
+            # Crear driver
+            driver = webdriver.Chrome(options=chrome_options)
             
-            soup = BeautifulSoup(response.content, 'html.parser')
+            # Cargar página
+            logger.info("Cargando página...")
+            driver.get(self.base_url)
             
-            # Buscar botones de compra o secciones de disponibilidad
-            # Nota: La estructura exacta depende del HTML actual de la Alhambra
+            # Esperar a que cargue contenido (max 10 segundos)
+            try:
+                WebDriverWait(driver, 10).until(
+                    lambda d: len(d.page_source) > 500
+                )
+                logger.info("✅ Página cargada correctamente")
+            except:
+                logger.warning("⚠️ Timeout esperando contenido, continuando...")
+            
+            # Obtener HTML después de que JavaScript se ejecute
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            
+            # Buscar botones de compra
             buy_buttons = soup.find_all('button', {'class': ['buy', 'comprar', 'add-to-cart']})
-            availability_sections = soup.find_all('div', {'class': ['availability', 'disponibilidad']})
+            
+            logger.info(f"Botones encontrados: {len(buy_buttons)}")
             
             # Si hay botones de compra, las entradas están disponibles
             if buy_buttons:
@@ -117,22 +141,38 @@ class AlhambraMonitor:
                         available=False
                     ))
             
+            # Si no encuentra nada, buscar precios con €
             if not tickets:
-                # Si no encuentra nada específico, asume que hay disponibilidad
-                tickets.append(TicketInfo(
-                    timestamp=datetime.now().isoformat(),
-                    ticket_type='General',
-                    available=True
-                ))
+                prices = soup.find_all(string=lambda x: '€' in str(x) if x else False)
+                if prices:
+                    logger.info(f"Precios encontrados en la página: {len(prices)}")
+                    tickets.append(TicketInfo(
+                        timestamp=datetime.now().isoformat(),
+                        ticket_type='General',
+                        available=True,
+                        price=str(prices[0]).strip() if prices else None
+                    ))
+                else:
+                    logger.warning("⚠️ No se encontraron precios en la página")
+                    tickets.append(TicketInfo(
+                        timestamp=datetime.now().isoformat(),
+                        ticket_type='General',
+                        available=True
+                    ))
             
-            logger.info(f"Verificación realizada: {len(tickets)} tipos de entrada encontrados")
+            logger.info(f"✅ Verificación realizada: {len(tickets)} tipos de entrada encontrados")
             
-        except requests.RequestException as e:
-            logger.error(f"Error al conectar con la web: {e}")
-            return []
         except Exception as e:
-            logger.error(f"Error inesperado: {e}")
+            logger.error(f"❌ Error: {e}", exc_info=True)
             return []
+        finally:
+            # Cerrar el navegador
+            if driver:
+                try:
+                    driver.quit()
+                    logger.info("Navegador cerrado")
+                except:
+                    pass
         
         return tickets
     
