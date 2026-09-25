@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,19 +32,30 @@ def log(msg: str) -> None:
     print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC] {msg}", flush=True)
 
 
-def fetch_html(retries: int = 3) -> str:
+def fetch_html(retries: int = 4) -> str:
+    """Obscura en modo stealth. La web a veces sirve un reto anti-bot;
+    la cookie que deja se guarda en --storage-dir y el siguiente intento pasa."""
+    storage = os.getenv("OBSCURA_STORAGE", "obscura-storage")
+    out_file = Path("page.html")
     for attempt in range(1, retries + 1):
+        out_file.unlink(missing_ok=True)
         try:
-            out = subprocess.run(
-                [OBSCURA_BIN, "fetch", URL, "--dump", "html", "--wait-until", "networkidle0"],
-                capture_output=True, text=True, timeout=90,
+            proc = subprocess.run(
+                [OBSCURA_BIN, "--stealth", "--storage-dir", storage, "fetch", URL,
+                 "--dump", "html", "--wait", str(4 + 3 * attempt), "--timeout", "45",
+                 "--quiet", "--output", str(out_file)],
+                capture_output=True, text=True, timeout=120,
             )
-            html = out.stdout
+            html = out_file.read_text(errors="ignore") if out_file.exists() else ""
             if "/producto/" in html:
+                log(f"Página obtenida en el intento {attempt}")
                 return html
-            log(f"Intento {attempt}: HTML sin productos ({len(html)} bytes). stderr: {out.stderr[-300:]}")
+            title = re.search(r"<title>(.*?)</title>", html, re.S)
+            log(f"Intento {attempt}: sin productos ({len(html)} bytes, título: "
+                f"{title.group(1).strip()[:60] if title else '-'}) {proc.stderr[-150:].strip()}")
         except subprocess.TimeoutExpired:
             log(f"Intento {attempt}: timeout")
+        time.sleep(5 * attempt)
     raise RuntimeError("No se pudo obtener la página con productos tras varios intentos")
 
 
