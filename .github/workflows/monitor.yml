@@ -1,60 +1,70 @@
-name: 🎫 Alhambra Ticket Monitor - Cada 5 minutos
+name: Alhambra price monitor
 
 on:
   schedule:
-    # Ejecutar cada 5 minutos
     - cron: '*/5 * * * *'
-  workflow_dispatch:  # Permitir ejecución manual
+  workflow_dispatch:
+    inputs:
+      test_drop:
+        description: 'Simular bajada de precio (prueba de Discord)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: alhambra-monitor
+  cancel-in-progress: false
 
 jobs:
   monitor:
-    runs-on: ubuntu-latest
-    
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.12'
           cache: 'pip'
-      
-      - name: Install dependencies
+
+      - run: pip install -r requirements.txt
+
+      - name: Cache Obscura
+        id: obscura-cache
+        uses: actions/cache@v4
+        with:
+          path: obscura-bin
+          key: obscura-x86_64-linux-v1
+
+      - name: Descargar Obscura
+        if: steps.obscura-cache.outputs.cache-hit != 'true'
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      
-      - name: Install Chromium
+          mkdir -p obscura-bin && cd obscura-bin
+          curl -sSLO https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-x86_64-linux.tar.gz
+          tar xzf obscura-x86_64-linux.tar.gz && rm obscura-x86_64-linux.tar.gz
+
+      - name: Recuperar estado anterior
         run: |
-          apt-get update
-          apt-get install -y chromium-browser chromium-chromedriver
-      
-      - name: Run Alhambra Monitor
+          mkdir -p state
+          git fetch -q origin state && git show origin/state:prices.json > state/prices.json || echo "Sin estado previo (primera ejecución)"
+
+      - name: Ejecutar monitor
         env:
-          # Discord
+          OBSCURA_BIN: ./obscura-bin/obscura
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-          # Telegram (opcional)
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # Email (opcional)
-          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_SENDER: ${{ secrets.SMTP_SENDER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+          TEST_DROP: ${{ inputs.test_drop || 'false' }}
+        run: python monitor.py
+
+      - name: Guardar estado
+        if: success() && inputs.test_drop != true
         run: |
-          echo "🎫 Monitor Alhambra - $(date)"
-          python monitor.py --once
-          echo "✅ Ciclo completado"
-      
-      - name: Upload history & logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: alhambra-monitor-data
-          path: |
-            alhambra_history.json
-            alhambra_monitor.log
-          retention-days: 30
-          if-no-files-found: ignore
+          cd state
+          git init -q -b state
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add prices.json
+          git commit -qm "estado $(date -u +%FT%TZ)"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" state
