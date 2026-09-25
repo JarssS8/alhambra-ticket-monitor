@@ -75,6 +75,13 @@ jobs:
           if [ "${{ job.status }}" = "success" ]; then T=notice; else T=error; fi
           echo "::$T title=monitor::$(tail -c 1500 run.log | sed 's/%/%25/g' | tr '\n' '|')"
 
+      - name: Volcar página en fallo
+        if: failure()
+        run: |
+          mkdir -p dbg && cp page.html dbg/ 2>/dev/null || true
+          cd dbg && git init -q -b debug && git config user.email "bot@users.noreply.github.com" && git config user.name bot
+          git add -A && git commit -qm dbg && git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" debug
+
       - name: Guardar estado
         if: success() && inputs.test_drop != true
         run: |
