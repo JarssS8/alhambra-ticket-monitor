@@ -1,0 +1,30 @@
+name: diagnose
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch con curl
+        run: |
+          mkdir -p debug
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
+          curl -sSL -A "$UA" -H "Accept-Language: es-ES,es;q=0.9" -D debug/curl_headers.txt -o debug/curl.html -w "status=%{http_code} final=%{url_effective}\n" https://tickets.alhambra-patronato.es/ > debug/curl_status.txt 2>&1 || true
+          cat debug/curl_status.txt
+      - name: Fetch con Obscura
+        run: |
+          curl -sSLO https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-x86_64-linux.tar.gz || true
+          tar xzf obscura-x86_64-linux.tar.gz 2>/dev/null || true
+          ls -la > debug/obscura_ls.txt
+          (./obscura fetch https://tickets.alhambra-patronato.es/ --dump html --wait-until networkidle0 --output debug/obscura.html) > debug/obscura_out.txt 2>&1 || true
+          (./obscura --help) > debug/obscura_help.txt 2>&1 || true
+      - name: Guardar en rama debug
+        run: |
+          git config user.email "bot@users.noreply.github.com"
+          git config user.name "diag-bot"
+          git checkout --orphan debug
+          git rm -rf --cached . > /dev/null
+          git add -f debug/
+          git commit -m "diag $(date -u +%H:%M)"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" debug
