@@ -1,0 +1,50 @@
+{
+  "updated": "2026-09-26T21:03:20.864936+00:00",
+  "prices": {
+    "alhambra-general": {
+      "name": "Alhambra general",
+      "price": 22.27,
+      "url": "https://tickets.alhambra-patronato.es/producto/alhambra-general/"
+    },
+    "jardines-generalife-y-alcazaba": {
+      "name": "Jardines generalife y alcazaba",
+      "price": 12.73,
+      "url": "https://tickets.alhambra-patronato.es/producto/jardines-generalife-y-alcazaba/"
+    },
+    "dobla-de-oro-general": {
+      "name": "Dobla de oro general",
+      "price": 30.48,
+      "url": "https://tickets.alhambra-patronato.es/producto/dobla-de-oro-general/"
+    },
+    "visita-nocturna-a-palacios-nazaries": {
+      "name": "Visita nocturna a palacios nazaries",
+      "price": 12.73,
+      "url": "https://tickets.alhambra-patronato.es/producto/visita-nocturna-a-palacios-nazaries/"
+    },
+    "visita-nocturna-jardines-y-generalife": {
+      "name": "Visita nocturna jardines y generalife",
+      "price": 8.48,
+      "url": "https://tickets.alhambra-patronato.es/producto/visita-nocturna-jardines-y-generalife/"
+    },
+    "dobla-de-oro-nocturna": {
+      "name": "Dobla de oro nocturna",
+      "price": 23.06,
+      "url": "https://tickets.alhambra-patronato.es/producto/dobla-de-oro-nocturna/"
+    },
+    "alhambra-experiencias": {
+      "name": "Alhambra experiencias",
+      "price": 22.27,
+      "url": "https://tickets.alhambra-patronato.es/producto/alhambra-experiencias/"
+    },
+    "visita-combinada-alhambra-y-fundacion-rodriguez-acosta": {
+      "name": "Visita combinada alhambra y fundacion rodriguez acosta",
+      "price": 25.45,
+      "url": "https://tickets.alhambra-patronato.es/producto/visita-combinada-alhambra-y-fundacion-rodriguez-acosta/"
+    },
+    "monumentos-andalusies": {
+      "name": "Monumentos andalusies",
+      "price": 8.48,
+      "url": "https://tickets.alhambra-patronato.es/producto/monumentos-andalusies/"
+    }
+  }
+}
